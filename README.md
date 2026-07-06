@@ -139,6 +139,37 @@ The default configuration is defined in `config/default_config.json` and in `src
 - Consider also setting a Windows user account password for the child's account.
 - Logs are written to `%APPDATA%\ComputerLockdown\lockdown.log` with automatic rotation (2 MB max, 3 backups).
 
+## Security Hardening
+
+Computer Lockdown implements several layers of protection, but for maximum security
+the following additional measures are recommended:
+
+### Automatic Protections (built-in)
+- **Config file integrity**: HMAC-signed configuration file — tampered configs are rejected and reset to defaults
+- **Config storage**: Stored in `%PROGRAMDATA%\ComputerLockdown\` (requires admin to modify)
+- **Dangerous tool blocking**: PowerShell, CMD, WSL, wscript, certutil, regedit, taskmgr, and 20+ other tools are blocked in locked mode
+- **DNS-over-HTTPS blocking**: Known DoH provider IPs blocked via Windows Firewall to prevent bypass of web filtering
+- **Safe Mode protection**: BCD modified to prevent Safe Mode boot bypass
+
+### Recommended Manual Steps
+1. **Set a BIOS/UEFI password** — prevents booting from USB
+2. **Enable Secure Boot** — prevents unauthorized OS booting
+3. **Enable BitLocker** — prevents offline disk access
+4. **Create a standard (non-admin) Windows account** for the child
+5. **Block Microsoft Store** via Group Policy (`gpedit.msc` → Computer Configuration → Administrative Templates → Windows Components → Store)
+6. **Disable USB boot** in BIOS settings
+7. **Set Windows Update to admin-only** to prevent feature changes
+8. **Use a DNS-level blocker** (e.g. OpenDNS Family Shield at router level) as a second layer of web filtering
+
+### Known Limitations
+- **User-space application**: Runs as a regular process, not a kernel driver. A sufficiently advanced user with admin access could terminate it.
+- **Hosts file web blocking**: Effective for basic blocking but can be bypassed by apps that use their own DNS resolution. DoH blocking mitigates the most common bypass.
+- **Download monitoring**: Only watches Downloads, Desktop, and Documents folders. Files saved to other locations are not monitored.
+- **Browser extensions**: Cannot prevent installation of browser extensions that may provide proxy/VPN functionality.
+
+For enterprise-grade protection, consider supplementing with Microsoft Family Safety,
+Windows Defender Application Control (WDAC), or an MDM solution like Microsoft Intune.
+
 ## Development
 
 ### Project Setup

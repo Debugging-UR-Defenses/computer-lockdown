@@ -2,11 +2,13 @@
 Configuration management for Computer Lockdown.
 
 Handles loading, saving, and accessing application configuration stored as JSON.
-Primary location: %APPDATA%/ComputerLockdown/config.json (Windows)
+Primary location: %PROGRAMDATA%/ComputerLockdown/config.json (Windows)
 Fallback location: ./config/config.json (development)
 """
 
 import copy
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -16,6 +18,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+_HMAC_KEY = b"ComputerLockdown_ConfigIntegrity_v1"
 
 # ---------------------------------------------------------------------------
 # Default configuration
@@ -31,6 +35,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
             {"name": "Microsoft Edge", "path": "msedge.exe"},
             {"name": "File Explorer", "path": "explorer.exe"},
         ],
+        "allowed_services": [
+            {"name": "Windows Defender", "path": "MsMpEng.exe", "parent_app": "System"},
+            {"name": "Windows Update", "path": "wuauclt.exe", "parent_app": "System"},
+        ],
+        "auto_detect_dependencies": True,
     },
     "web_blocking": {
         "enabled": True,
@@ -41,22 +50,33 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "time_limits": {
         "enabled": True,
         "daily_limit_minutes": 120,
+        "hard_cutoff": "20:30",
+        "warning_minutes": 10,
         "schedule": {
-            "monday": {"start": "15:00", "end": "20:00"},
-            "tuesday": {"start": "15:00", "end": "20:00"},
-            "wednesday": {"start": "15:00", "end": "20:00"},
-            "thursday": {"start": "15:00", "end": "20:00"},
-            "friday": {"start": "15:00", "end": "21:00"},
-            "saturday": {"start": "10:00", "end": "21:00"},
-            "sunday": {"start": "10:00", "end": "20:00"},
+            "monday": {"enabled": True, "start": "15:00", "end": "20:00"},
+            "tuesday": {"enabled": True, "start": "15:00", "end": "20:00"},
+            "wednesday": {"enabled": True, "start": "15:00", "end": "20:00"},
+            "thursday": {"enabled": True, "start": "15:00", "end": "20:00"},
+            "friday": {"enabled": True, "start": "15:00", "end": "21:00"},
+            "saturday": {"enabled": True, "start": "10:00", "end": "21:00"},
+            "sunday": {"enabled": True, "start": "10:00", "end": "20:00"},
         },
     },
     "download_blocking": {
         "enabled": True,
+        "block_all_in_locked_mode": True,
         "block_extensions": [
             ".exe", ".msi", ".bat", ".cmd", ".ps1",
             ".vbs", ".js", ".wsf", ".scr",
         ],
+        "review_queue": [],
+        "quarantine_dir": "",
+    },
+    "network_rules": {
+        "enabled": False,
+        "allowed_lan_services": [],
+        "allow_all_lan": False,
+        "blocked_ports": [],
     },
     "policy": {
         "block_task_manager": True,
@@ -79,14 +99,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
 def _resolve_config_path() -> Path:
     """Return the path to the configuration file.
 
-    On Windows the config lives under ``%APPDATA%/ComputerLockdown/``.
-    On other platforms (or when ``%APPDATA%`` is not set) the function falls
+    On Windows the config lives under ``%PROGRAMDATA%/ComputerLockdown/``.
+    On other platforms (or when ``%PROGRAMDATA%`` is not set) the function falls
     back to ``./config/config.json`` for local development.
     """
     if platform.system() == "Windows":
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            return Path(appdata) / "ComputerLockdown" / "config.json"
+        programdata = os.environ.get("PROGRAMDATA")
+        if programdata:
+            return Path(programdata) / "ComputerLockdown" / "config.json"
 
     # Development fallback
     return Path(__file__).resolve().parents[2] / "config" / "config.json"
@@ -108,7 +128,7 @@ class ConfigManager:
     def __init__(self, config_path: Optional[str | Path] = None) -> None:
         self._path: Path = Path(config_path) if config_path else _resolve_config_path()
         self._data: dict[str, Any] = copy.deepcopy(DEFAULT_CONFIG)
-        self._lock: threading.Lock = threading.Lock()
+        self._lock: threading.RLock = threading.RLock()
 
     # ------------------------------------------------------------------
     # Properties
@@ -147,6 +167,30 @@ class ConfigManager:
                 # Merge loaded values on top of defaults so new keys are
                 # always present even if the file is from an older version.
                 self._data = self._deep_merge(copy.deepcopy(DEFAULT_CONFIG), loaded)
+                # HMAC verification
+                sig_path = self._path.with_suffix(".sig")
+                if sig_path.exists():
+                    try:
+                        stored_sig = sig_path.read_text(encoding="utf-8").strip()
+                        computed_sig = hmac.new(_HMAC_KEY, raw.encode("utf-8"), hashlib.sha256).hexdigest()
+                        if not hmac.compare_digest(stored_sig, computed_sig):
+                            logger.warning(
+                                "Config file integrity check FAILED — file may have been tampered with. "
+                                "Reverting to defaults."
+                            )
+                            self._data = copy.deepcopy(DEFAULT_CONFIG)
+                            self._write_locked()
+                            return
+                        logger.debug("Config integrity check passed.")
+                    except OSError:
+                        logger.debug("Could not read signature file.")
+                else:
+                    # No sig file yet (first run or upgrade) — write one
+                    sig = hmac.new(_HMAC_KEY, raw.encode("utf-8"), hashlib.sha256).hexdigest()
+                    try:
+                        sig_path.write_text(sig, encoding="utf-8")
+                    except OSError:
+                        pass
                 logger.info("Configuration loaded from %s", self._path)
             except (json.JSONDecodeError, OSError) as exc:
                 logger.error("Failed to load config (%s) — using defaults.", exc)
@@ -160,13 +204,14 @@ class ConfigManager:
     def _write_locked(self) -> None:
         """Write ``self._data`` to disk.  Must be called while holding ``_lock``."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        json_content = json.dumps(self._data, indent=2, ensure_ascii=False) + "\n"
         tmp_path = self._path.with_suffix(".tmp")
         try:
-            tmp_path.write_text(
-                json.dumps(self._data, indent=2, ensure_ascii=False) + "\n",
-                encoding="utf-8",
-            )
+            tmp_path.write_text(json_content, encoding="utf-8")
             tmp_path.replace(self._path)
+            # Write HMAC signature
+            sig = hmac.new(_HMAC_KEY, json_content.encode("utf-8"), hashlib.sha256).hexdigest()
+            self._path.with_suffix(".sig").write_text(sig, encoding="utf-8")
             logger.debug("Configuration saved to %s", self._path)
         except OSError as exc:
             logger.error("Failed to save config: %s", exc)

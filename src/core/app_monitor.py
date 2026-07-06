@@ -64,6 +64,37 @@ _OWN_PROCESS_NAMES: set[str] = {
 }
 
 # ---------------------------------------------------------------------------
+# Dangerous system tools that should be terminated even if whitelisted.
+# A child could use these to bypass lockdown restrictions.
+# ---------------------------------------------------------------------------
+BLOCKED_SYSTEM_TOOLS: set[str] = {
+    "powershell.exe",
+    "powershell_ise.exe",
+    "pwsh.exe",              # PowerShell Core
+    "cmd.exe",
+    "wt.exe",                # Windows Terminal
+    "wscript.exe",           # Windows Script Host
+    "cscript.exe",           # Command-line script host
+    "mshta.exe",             # HTML Application host
+    "certutil.exe",          # Can download files
+    "bitsadmin.exe",         # Background transfer — downloads files
+    "reg.exe",               # Command-line registry editor
+    "regedit.exe",           # Registry editor
+    "sc.exe",                # Service control
+    "net.exe",               # Network commands
+    "net1.exe",              # Network commands (alt)
+    "wsl.exe",               # Windows Subsystem for Linux
+    "bash.exe",              # WSL bash
+    "ubuntu.exe",            # WSL Ubuntu
+    "taskmgr.exe",           # Task Manager
+    "taskkill.exe",          # Process killer
+    "tskill.exe",            # Terminal Services process killer
+    "mmc.exe",               # Management console
+    "msconfig.exe",          # System config
+    "eventvwr.exe",          # Event viewer
+}
+
+# ---------------------------------------------------------------------------
 # Windows process helpers (ctypes / subprocess)
 # ---------------------------------------------------------------------------
 
@@ -286,6 +317,11 @@ class AppMonitor:
             ``True`` if the process should be kept alive.
         """
         name_lower = process_name.lower()
+
+        # Dangerous system tools are always blocked (unless in admin mode).
+        if name_lower in BLOCKED_SYSTEM_TOOLS:
+            if not self.config.get("admin_mode", False):
+                return False
 
         # 1. Always allow system-critical processes.
         if name_lower in SYSTEM_CRITICAL_PROCESSES:

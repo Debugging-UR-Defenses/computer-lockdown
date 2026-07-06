@@ -17,6 +17,7 @@ from .web_blocker import WebBlocker
 from .time_manager import TimeManager
 from .download_blocker import DownloadBlocker
 from .policy_manager import PolicyManager
+from .network_rules import NetworkRules
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ class LockdownService:
         self.time_manager: TimeManager = TimeManager(config_manager)
         self.download_blocker: DownloadBlocker = DownloadBlocker(config_manager)
         self.policy_manager: PolicyManager = PolicyManager(config_manager)
+        self.network_rules: NetworkRules = NetworkRules(config_manager)
 
         self._admin_mode: bool = False
         self._status_callbacks: list[Callable] = []
@@ -99,6 +101,17 @@ class LockdownService:
         self.policy_manager.apply_policies()
         logger.info("  Policy manager: policies applied")
 
+        # Network rules
+        if self.config.get("network_rules.enabled", False):
+            self.network_rules.apply_rules()
+            logger.info("  Network rules: ACTIVE")
+        else:
+            logger.info("  Network rules: disabled in config")
+
+        # Security hardening
+        self._disable_safe_mode()
+        self._block_doh_endpoints()
+
         self._notify_status_change()
         logger.info("Lockdown started.")
 
@@ -116,6 +129,8 @@ class LockdownService:
         self.time_manager.stop()
         self.download_blocker.stop()
         self.policy_manager.remove_policies()
+        self.network_rules.remove_rules()
+        self._unblock_doh_endpoints()
 
         self._notify_status_change()
         logger.info("Lockdown stopped.")
@@ -221,6 +236,10 @@ class LockdownService:
                 "enabled": any_policy_enabled,
                 "active": any_policy_active,
             },
+            "network_rules": {
+                "enabled": self.config.get("network_rules.enabled", False),
+                "active": len(self.network_rules.get_applied_rules()) > 0,
+            },
         }
 
     def add_status_callback(self, callback: Callable) -> None:
@@ -231,6 +250,98 @@ class LockdownService:
         """
         if callback not in self._status_callbacks:
             self._status_callbacks.append(callback)
+
+    # ------------------------------------------------------------------
+    # Security hardening
+    # ------------------------------------------------------------------
+
+    def _disable_safe_mode(self) -> None:
+        """Disable Safe Mode boot via BCD to prevent bypass."""
+        import platform
+        if platform.system() != "Windows":
+            logger.debug("Dry-run: would disable Safe Mode.")
+            return
+        import subprocess
+        try:
+            subprocess.run(
+                ["bcdedit", "/set", "{default}", "safeboot", "minimal"],
+                capture_output=True, timeout=10,
+            )
+            # Remove the safeboot option to prevent booting into it
+            subprocess.run(
+                ["bcdedit", "/deletevalue", "{default}", "safeboot"],
+                capture_output=True, timeout=10,
+            )
+            logger.info("Safe Mode boot disabled via BCD.")
+        except Exception:
+            logger.warning("Could not modify BCD — Safe Mode may still be accessible.")
+
+    def _block_doh_endpoints(self) -> None:
+        """Block known DNS-over-HTTPS endpoints via Windows Firewall.
+
+        This prevents browsers from bypassing hosts-file-based web blocking.
+        """
+        import platform
+        if platform.system() != "Windows":
+            logger.debug("Dry-run: would block DoH endpoints.")
+            return
+        import subprocess
+
+        # Major DoH provider IPs that browsers use
+        doh_ips = [
+            # Cloudflare
+            "1.1.1.1", "1.0.0.1",
+            "2606:4700:4700::1111", "2606:4700:4700::1001",
+            # Google
+            "8.8.8.8", "8.8.4.4",
+            "2001:4860:4860::8888", "2001:4860:4860::8844",
+            # Quad9
+            "9.9.9.9", "149.112.112.112",
+            # Mozilla/NextDNS
+            "45.90.28.0", "45.90.30.0",
+        ]
+
+        rule_name = "ComputerLockdown_BlockDoH"
+
+        # Remove existing rule first
+        try:
+            subprocess.run(
+                ["netsh", "advfirewall", "firewall", "delete", "rule",
+                 f"name={rule_name}"],
+                capture_output=True, timeout=10,
+            )
+        except Exception:
+            pass
+
+        # Block outbound HTTPS (443) to DoH providers
+        for ip in doh_ips:
+            try:
+                subprocess.run(
+                    ["netsh", "advfirewall", "firewall", "add", "rule",
+                     f"name={rule_name}", "dir=out", "action=block",
+                     "protocol=tcp", f"remoteip={ip}", "remoteport=443"],
+                    capture_output=True, timeout=10,
+                )
+            except Exception:
+                pass
+
+        logger.info("DoH endpoints blocked via firewall (%d IPs).", len(doh_ips))
+
+    def _unblock_doh_endpoints(self) -> None:
+        """Remove the DoH blocking firewall rules."""
+        import platform
+        if platform.system() != "Windows":
+            return
+        import subprocess
+        try:
+            subprocess.run(
+                ["netsh", "advfirewall", "firewall", "delete", "rule",
+                 "name=ComputerLockdown_BlockDoH"],
+                capture_output=True, timeout=10,
+            )
+            logger.info("DoH endpoint blocks removed.")
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # Internal helpers

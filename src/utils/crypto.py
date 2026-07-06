@@ -127,7 +127,7 @@ def is_password_set(config_manager: Optional[object] = None) -> bool:
     """
     if config_manager is None:
         # Lazy import to avoid circular dependency at module level
-        from src.utils.config import ConfigManager
+        from .config import ConfigManager
 
         config_manager = ConfigManager()
         config_manager.load()

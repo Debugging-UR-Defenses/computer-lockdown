@@ -13,6 +13,8 @@ from .app_manager_gui import AppManagerPage
 from .web_manager_gui import WebManagerPage
 from .time_manager_gui import TimeManagerPage
 from .settings_gui import SettingsPage
+from .downloads_gui import DownloadsManagerPage
+from .policies_gui import PoliciesManagerPage
 from .app import ComputerLockdownApp
 
 __all__ = [
@@ -23,5 +25,7 @@ __all__ = [
     "WebManagerPage",
     "TimeManagerPage",
     "SettingsPage",
+    "DownloadsManagerPage",
+    "PoliciesManagerPage",
     "ComputerLockdownApp",
 ]

@@ -268,11 +268,13 @@ class TimeManager:
 
     def set_warning_callback(self, callback: Callable) -> None:
         """Set the function to call when nearing the time limit."""
-        self._callbacks["warning"] = callback
+        with self._lock:
+            self._callbacks["warning"] = callback
 
     def set_lockout_callback(self, callback: Callable) -> None:
         """Set the function to call when time is up / outside schedule."""
-        self._callbacks["lockout"] = callback
+        with self._lock:
+            self._callbacks["lockout"] = callback
 
     def on_lockout(self) -> None:
         """Default lockout handler: lock the Windows workstation.
@@ -303,7 +305,8 @@ class TimeManager:
 
     def _fire_callback(self, name: str) -> None:
         """Fire a named callback, falling back to ``on_lockout`` for lockouts."""
-        cb = self._callbacks.get(name)
+        with self._lock:
+            cb = self._callbacks.get(name)
         if cb is not None:
             try:
                 cb()
@@ -315,7 +318,11 @@ class TimeManager:
     def _persist_usage(self) -> None:
         """Save today's usage to config so it survives restarts."""
         today_str = date.today().isoformat()
-        self.config.set("usage_log.daily_usage_minutes", {today_str: self._today_usage})
+        usage_dict: dict = self.config.get("usage_log.daily_usage_minutes", {})
+        if not isinstance(usage_dict, dict):
+            usage_dict = {}
+        usage_dict[today_str] = self._today_usage
+        self.config.set("usage_log.daily_usage_minutes", usage_dict)
         self.config.set("usage_log.last_reset_date", today_str)
 
     def _restore_usage(self) -> None:

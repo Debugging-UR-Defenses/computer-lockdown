@@ -22,6 +22,8 @@ from .app_manager_gui import AppManagerPage
 from .web_manager_gui import WebManagerPage
 from .time_manager_gui import TimeManagerPage
 from .settings_gui import SettingsPage
+from .downloads_gui import DownloadsManagerPage
+from .policies_gui import PoliciesManagerPage
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +172,8 @@ class ComputerLockdownApp:
                 "apps": lambda parent: AppManagerPage(parent, self._config),
                 "websites": lambda parent: WebManagerPage(parent, self._config),
                 "time": lambda parent: TimeManagerPage(parent, self._config),
+                "downloads": lambda parent: DownloadsManagerPage(parent, self._config),
+                "policies": lambda parent: PoliciesManagerPage(parent, self._config),
                 "settings": lambda parent: SettingsPage(parent, self._config),
             }
             self._dashboard = Dashboard(
@@ -189,12 +193,16 @@ class ComputerLockdownApp:
 
     def _on_login_success(self) -> None:
         """Invoked by :class:`LoginScreen` after password verification."""
+        if self._lockdown_service is not None:
+            self._lockdown_service.stop_lockdown()
         self._config.set("admin_mode", True)
         self.show_admin_panel()
 
     def _on_lockdown(self) -> None:
         """Invoked by :class:`Dashboard` when the admin locks down."""
         self._config.set("admin_mode", False)
+        if self._lockdown_service is not None:
+            self._lockdown_service.start_lockdown()
         self.show_locked_screen()
 
     def _verify_password(self, password: str) -> bool:

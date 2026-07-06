@@ -45,7 +45,7 @@ class LoginScreen(ctk.CTkFrame):
         self._on_login_success = on_login_success
         self._verify_callback = verify_callback
 
-            self._build_ui()
+        self._build_ui()
 
     # ------------------------------------------------------------------
     # UI construction
