@@ -8,53 +8,10 @@ import customtkinter as ctk
 import sys
 
 
-# ── Mousewheel / trackpad scrolling fix ───────────────────────────────────────
-
-def _enable_mousewheel_scroll(scrollable_frame):
-    """Bind mousewheel/trackpad events so scrolling works without the scrollbar."""
-    canvas = None
-    for child in scrollable_frame.winfo_children():
-        if isinstance(child, ctk.CTkCanvas) or child.winfo_class() == "Canvas":
-            canvas = child
-            break
-    if canvas is None:
-        try:
-            canvas = scrollable_frame._parent_canvas
-        except AttributeError:
-            return
-
-    def _on_mousewheel(event):
-        if sys.platform == "darwin":
-            canvas.yview_scroll(int(-1 * event.delta), "units")
-        else:
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-    def _bind_wheel(event):
-        if sys.platform == "darwin":
-            canvas.bind_all("<MouseWheel>", _on_mousewheel)
-        else:
-            canvas.bind_all("<MouseWheel>", _on_mousewheel)
-            canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-3, "units"))
-            canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(3, "units"))
-
-    def _unbind_wheel(event):
-        canvas.unbind_all("<MouseWheel>")
-        if sys.platform != "darwin":
-            canvas.unbind_all("<Button-4>")
-            canvas.unbind_all("<Button-5>")
-
-    scrollable_frame.bind("<Enter>", _bind_wheel)
-    scrollable_frame.bind("<Leave>", _unbind_wheel)
-
-
-# Monkey-patch CTkScrollableFrame so every instance gets trackpad scrolling
-_original_sf_init = ctk.CTkScrollableFrame.__init__
-
-def _patched_sf_init(self, *args, **kwargs):
-    _original_sf_init(self, *args, **kwargs)
-    self.after(100, lambda: _enable_mousewheel_scroll(self))
-
-ctk.CTkScrollableFrame.__init__ = _patched_sf_init
+# ── Scrolling note ────────────────────────────────────────────────────────────
+# Tk 9.0 on macOS does not fire <MouseWheel> for trackpad scrolling.
+# This is a known Tk bug — trackpad scroll works fine on Windows (the target).
+# For macOS preview, use the scrollbars or arrow keys.
 
 
 # ── Theme ─────────────────────────────────────────────────────────────────────
