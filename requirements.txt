@@ -1,0 +1,23 @@
+# Computer Lockdown - Python dependencies
+# Install with:  pip install -r requirements.txt
+
+# GUI framework (dark/modern Tkinter widgets)
+customtkinter>=5.2.0
+
+# Process monitoring & system info
+psutil>=5.9.0
+
+# Filesystem event monitoring (download blocking)
+watchdog>=3.0.0
+
+# System-tray icon support
+pystray>=0.19.0
+
+# Image processing (required by pystray for tray icons)
+Pillow>=10.0.0
+
+# Password hashing (falls back to PBKDF2 if unavailable)
+bcrypt>=4.0.0
+
+# Executable packaging (development / build only)
+pyinstaller>=6.0.0

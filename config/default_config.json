@@ -1,0 +1,50 @@
+{
+  "admin_password_hash": "",
+  "admin_mode": false,
+  "app_whitelist": {
+    "enabled": true,
+    "allowed_apps": [
+      {"name": "Google Chrome", "path": "chrome.exe"},
+      {"name": "Microsoft Edge", "path": "msedge.exe"},
+      {"name": "File Explorer", "path": "explorer.exe"}
+    ]
+  },
+  "web_blocking": {
+    "enabled": true,
+    "mode": "blacklist",
+    "blocked_sites": [],
+    "allowed_sites": []
+  },
+  "time_limits": {
+    "enabled": true,
+    "daily_limit_minutes": 120,
+    "schedule": {
+      "monday": {"start": "15:00", "end": "20:00"},
+      "tuesday": {"start": "15:00", "end": "20:00"},
+      "wednesday": {"start": "15:00", "end": "20:00"},
+      "thursday": {"start": "15:00", "end": "20:00"},
+      "friday": {"start": "15:00", "end": "21:00"},
+      "saturday": {"start": "10:00", "end": "21:00"},
+      "sunday": {"start": "10:00", "end": "20:00"}
+    }
+  },
+  "download_blocking": {
+    "enabled": true,
+    "block_extensions": [".exe", ".msi", ".bat", ".cmd", ".ps1", ".vbs", ".js", ".wsf", ".scr"]
+  },
+  "policy": {
+    "block_task_manager": true,
+    "block_cmd": true,
+    "block_registry_editor": true,
+    "block_control_panel": false,
+    "block_settings": false
+  },
+  "startup": {
+    "run_on_startup": true,
+    "start_locked": true
+  },
+  "usage_log": {
+    "daily_usage_minutes": {},
+    "last_reset_date": ""
+  }
+}
