@@ -145,8 +145,10 @@ class TimeManager:
         """Evaluate the current time against the schedule and daily limit.
 
         * If the date has rolled over, the daily usage counter is reset.
-        * If usage is within ``_WARNING_THRESHOLD_MINUTES`` of the limit
-          the ``"warning"`` callback is fired.
+        * If the hard cutoff time has passed, lockout is triggered
+          immediately.
+        * If usage is within the configured warning threshold of the
+          limit the ``"warning"`` callback is fired.
         * If usage exceeds the limit **or** the current time is outside
           the allowed schedule, the ``"lockout"`` callback is fired.
         """
@@ -163,6 +165,14 @@ class TimeManager:
             # Increment usage by roughly the check interval (in minutes).
             self._today_usage += max(1, int(self.CHECK_INTERVAL / 60))
             self._persist_usage()
+
+        # --- Check 0: Hard cutoff time ---
+        if self._is_past_hard_cutoff():
+            logger.info("Hard cutoff time reached.")
+            if not self._lockout_fired:
+                self._lockout_fired = True
+                self._fire_callback("lockout")
+            return
 
         daily_limit: int = self.config.get("time_limits.daily_limit_minutes", 120)
         remaining = daily_limit - self._today_usage
@@ -184,7 +194,8 @@ class TimeManager:
             return
 
         # --- Check 3: Approaching limit (warning)? ---
-        if remaining <= _WARNING_THRESHOLD_MINUTES:
+        warning_threshold: int = self.config.get("time_limits.warning_minutes", 10)
+        if remaining <= warning_threshold:
             logger.info("%d minute(s) remaining before daily limit.", remaining)
             if not self._warning_fired:
                 self._warning_fired = True
@@ -228,6 +239,11 @@ class TimeManager:
             # No schedule for today → unrestricted.
             return True
 
+        # Check if this day is enabled at all.
+        if isinstance(schedule, dict) and not schedule.get("enabled", True):
+            logger.info("Computer use is disabled for %s.", day_name)
+            return False
+
         start_str: Optional[str] = schedule.get("start")
         end_str: Optional[str] = schedule.get("end")
         if not start_str or not end_str:
@@ -270,6 +286,20 @@ class TimeManager:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _is_past_hard_cutoff(self) -> bool:
+        """Check if current time is past the hard cutoff."""
+        cutoff_str = self.config.get("time_limits.hard_cutoff", "")
+        if not cutoff_str:
+            return False
+        try:
+            cutoff_hour, cutoff_min = map(int, cutoff_str.split(":"))
+            now = datetime.now()
+            return (now.hour > cutoff_hour or
+                    (now.hour == cutoff_hour and now.minute >= cutoff_min))
+        except (ValueError, AttributeError):
+            logger.warning("Invalid hard_cutoff format: %s", cutoff_str)
+            return False
 
     def _fire_callback(self, name: str) -> None:
         """Fire a named callback, falling back to ``on_lockout`` for lockouts."""

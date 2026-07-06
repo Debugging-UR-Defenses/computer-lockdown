@@ -295,7 +295,7 @@ class AppMonitor:
         if name_lower in _OWN_PROCESS_NAMES:
             return True
 
-        # 3. Check the user-configured whitelist.
+        # 3. Check the user-configured app whitelist.
         allowed_apps: list[dict] = self.config.get("app_whitelist.allowed_apps", [])
         for app_entry in allowed_apps:
             app_path: str = app_entry.get("path", "")
@@ -311,7 +311,71 @@ class AppMonitor:
                 if os.path.basename(process_path).lower() == app_path.lower():
                     return True
 
+        # 4. Check the service whitelist.
+        allowed_services: list[dict] = self.config.get("app_whitelist.allowed_services", [])
+        for svc in allowed_services:
+            svc_path: str = svc.get("path", "")
+            if not svc_path:
+                continue
+            if name_lower == svc_path.lower():
+                return True
+            if process_path and svc_path.lower() in process_path.lower():
+                return True
+
         return False
+
+    # ------------------------------------------------------------------
+    # Dependency detection
+    # ------------------------------------------------------------------
+
+    def detect_app_dependencies(self, app_path: str) -> list[dict]:
+        """Scan running processes to find potential dependencies of an app.
+
+        Looks for processes running from the same directory tree as the given app.
+        Returns list of dicts with name, path, parent_app keys.
+        """
+        if not app_path:
+            return []
+
+        app_dir = os.path.dirname(app_path).lower()
+        if not app_dir:
+            return []
+
+        dependencies = []
+        pids = _enum_process_ids()
+        own_pid = os.getpid()
+        seen_names: set[str] = set()
+
+        for pid in pids:
+            if pid == 0 or pid == own_pid:
+                continue
+            proc_name = _get_process_name(pid)
+            proc_path = _get_process_path(pid)
+            if not proc_name or not proc_path:
+                continue
+
+            proc_name_lower = proc_name.lower()
+            if proc_name_lower in seen_names:
+                continue
+
+            # Skip system processes and already-whitelisted apps
+            if proc_name_lower in SYSTEM_CRITICAL_PROCESSES:
+                continue
+            if proc_name_lower in _OWN_PROCESS_NAMES:
+                continue
+
+            # Check if this process is in the same directory tree
+            proc_dir = os.path.dirname(proc_path).lower()
+            if proc_dir.startswith(app_dir) or app_dir.startswith(proc_dir):
+                seen_names.add(proc_name_lower)
+                app_name = os.path.basename(app_path)
+                dependencies.append({
+                    "name": proc_name.replace(".exe", ""),
+                    "path": proc_name,
+                    "parent_app": app_name.replace(".exe", ""),
+                })
+
+        return dependencies
 
     # ------------------------------------------------------------------
     # Accessors

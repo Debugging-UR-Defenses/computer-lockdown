@@ -2,8 +2,14 @@
 Download and installation blocking for Computer Lockdown.
 
 Monitors common download locations (Downloads, Desktop, Documents) for
-newly-created files whose extensions appear on the configured block list.
-Blocked files are immediately deleted and the event is logged.
+newly-created files.  When ``download_blocking.block_all_in_locked_mode``
+is enabled (the default), **all** new files are quarantined and placed
+into a review queue.  Otherwise only files whose extensions appear on
+the configured block list are quarantined (legacy behaviour).
+
+Quarantined files are moved to a dedicated quarantine directory and can
+be approved (restored to original location) or denied (permanently
+deleted) via the review queue API.
 
 If the ``watchdog`` library is available the module uses efficient
 filesystem event notifications; otherwise it falls back to a simple
@@ -13,6 +19,7 @@ polling strategy that scans every 5 seconds.
 import logging
 import os
 import platform
+import shutil
 import threading
 import time
 from datetime import datetime
@@ -97,10 +104,18 @@ if _WATCHDOG_AVAILABLE:
 # ---------------------------------------------------------------------------
 
 class DownloadBlocker:
-    """Monitors filesystem for new downloads and blocks dangerous file types.
+    """Monitors filesystem for new downloads and blocks/quarantines files.
 
-    Supported extensions are read from the configuration key
-    ``download_blocking.block_extensions``.
+    When ``download_blocking.block_all_in_locked_mode`` is ``True`` (the
+    default) every new file detected in the watched directories is moved
+    to the quarantine directory and added to the review queue.
+
+    When it is ``False``, only files whose extensions appear on the block
+    list (``download_blocking.block_extensions``) are quarantined (legacy
+    behaviour).
+
+    Quarantined files can be approved or denied via ``approve_download``
+    and ``deny_download``.
     """
 
     POLL_INTERVAL: float = 5.0  # seconds (used when watchdog is unavailable)
@@ -114,6 +129,30 @@ class DownloadBlocker:
         self._lock: threading.Lock = threading.Lock()
         # Snapshot for poll-based watching: {dir_path: set_of_filenames}
         self._snapshots: dict[str, set[str]] = {}
+
+        # Quarantine directory
+        self._quarantine_dir = self._get_quarantine_dir()
+
+    # ------------------------------------------------------------------
+    # Quarantine directory
+    # ------------------------------------------------------------------
+
+    def _get_quarantine_dir(self) -> Path:
+        """Get or create the quarantine directory."""
+        configured = self.config.get("download_blocking.quarantine_dir", "")
+        if configured:
+            qdir = Path(configured)
+        elif platform.system() == "Windows":
+            appdata = os.environ.get("APPDATA", "")
+            if appdata:
+                qdir = Path(appdata) / "ComputerLockdown" / "quarantine"
+            else:
+                qdir = Path("quarantine")
+        else:
+            qdir = Path("quarantine")
+
+        qdir.mkdir(parents=True, exist_ok=True)
+        return qdir
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -173,10 +212,11 @@ class DownloadBlocker:
     # ------------------------------------------------------------------
 
     def on_file_created(self, file_path: str) -> None:
-        """Called when a new file is detected.
+        """Handle a new file detection.
 
-        If the file's extension is on the block list it is deleted and
-        the event is logged.
+        If ``block_all_in_locked_mode`` is ``True``: quarantine **any** new
+        file.  Otherwise only block files with blocked extensions (legacy
+        behaviour).
 
         Parameters
         ----------
@@ -185,46 +225,151 @@ class DownloadBlocker:
         """
         path = Path(file_path)
 
-        # Skip directories and temporary/partial downloads.
         if path.is_dir():
             return
 
+        # Skip temporary/partial download files
+        if path.suffix.lower() in ('.crdownload', '.part', '.partial', '.tmp', '.temp'):
+            return
+
+        block_all = self.config.get("download_blocking.block_all_in_locked_mode", True)
         ext = path.suffix.lower()
-        if not ext:
-            return
 
-        if not self.is_extension_blocked(ext):
-            return
+        if block_all:
+            # Block ALL downloads in locked mode
+            self._quarantine_file(path)
+        elif ext and self.is_extension_blocked(ext):
+            # Legacy: only block specific extensions
+            self._quarantine_file(path)
 
-        # Attempt to delete the file.
-        logger.info("Blocked file detected: %s", path)
+    def _quarantine_file(self, path: Path) -> None:
+        """Move a file to quarantine and add to review queue."""
+        logger.info("Quarantining file: %s", path)
+
+        quarantine_name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{path.name}"
+        quarantine_path = self._quarantine_dir / quarantine_name
+
         try:
-            # Give a tiny delay — the file may still be held by the
-            # browser / downloader.
-            time.sleep(0.3)
-            path.unlink(missing_ok=True)
-            logger.info("Deleted blocked file: %s", path)
-        except PermissionError:
-            logger.warning(
-                "Could not delete %s — file is locked by another process.", path
-            )
-        except OSError as exc:
-            logger.warning("Failed to delete blocked file %s: %s", path, exc)
+            time.sleep(0.5)  # Wait for download to complete
+            if path.exists():
+                shutil.move(str(path), str(quarantine_path))
+                logger.info("File quarantined: %s -> %s", path, quarantine_path)
+            else:
+                logger.debug("File already gone: %s", path)
+                return
+        except (PermissionError, OSError) as exc:
+            logger.warning("Could not quarantine %s: %s", path, exc)
+            # Fall back to deletion
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            quarantine_path = None
 
         entry = {
+            "filename": path.name,
+            "original_path": str(path),
+            "quarantine_path": str(quarantine_path) if quarantine_path else "",
             "timestamp": datetime.now().isoformat(),
-            "file_path": str(path),
-            "extension": ext,
-            "deleted": not path.exists(),
+            "extension": path.suffix.lower(),
+            "status": "pending",
         }
+
         with self._lock:
             self._blocked_log.append(entry)
-            # Keep the log bounded.
             if len(self._blocked_log) > 500:
                 self._blocked_log = self._blocked_log[-500:]
 
-        # Attempt a user notification on Windows.
+        # Also persist to config review queue
+        queue = self.config.get("download_blocking.review_queue", [])
+        queue.append(entry)
+        # Keep only last 100 in persistent queue
+        if len(queue) > 100:
+            queue = queue[-100:]
+        self.config.set("download_blocking.review_queue", queue)
+
         self._notify_user(path.name)
+
+    # ------------------------------------------------------------------
+    # Review queue — approve / deny
+    # ------------------------------------------------------------------
+
+    def approve_download(self, index: int) -> bool:
+        """Approve a quarantined download, restoring it to its original location.
+
+        Args:
+            index: Index into the review queue.
+
+        Returns:
+            True if the file was successfully restored.
+        """
+        queue = self.config.get("download_blocking.review_queue", [])
+        if index < 0 or index >= len(queue):
+            return False
+
+        entry = queue[index]
+        if entry.get("status") != "pending":
+            return False
+
+        quarantine_path = entry.get("quarantine_path", "")
+        original_path = entry.get("original_path", "")
+
+        if quarantine_path and original_path and Path(quarantine_path).exists():
+            try:
+                # Make sure original directory exists
+                Path(original_path).parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(quarantine_path, original_path)
+                entry["status"] = "approved"
+                queue[index] = entry
+                self.config.set("download_blocking.review_queue", queue)
+                logger.info("Download approved: %s", entry.get("filename"))
+                return True
+            except (OSError, PermissionError) as exc:
+                logger.warning("Failed to restore %s: %s", entry.get("filename"), exc)
+                return False
+
+        return False
+
+    def deny_download(self, index: int) -> bool:
+        """Deny a quarantined download, permanently deleting it.
+
+        Args:
+            index: Index into the review queue.
+
+        Returns:
+            True if the file was successfully deleted.
+        """
+        queue = self.config.get("download_blocking.review_queue", [])
+        if index < 0 or index >= len(queue):
+            return False
+
+        entry = queue[index]
+        if entry.get("status") != "pending":
+            return False
+
+        quarantine_path = entry.get("quarantine_path", "")
+
+        if quarantine_path:
+            try:
+                Path(quarantine_path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+        entry["status"] = "denied"
+        queue[index] = entry
+        self.config.set("download_blocking.review_queue", queue)
+        logger.info("Download denied: %s", entry.get("filename"))
+        return True
+
+    def get_review_queue(self) -> list[dict]:
+        """Return the current review queue from config."""
+        return self.config.get("download_blocking.review_queue", [])
+
+    def clear_resolved(self) -> None:
+        """Remove approved and denied entries from the review queue."""
+        queue = self.config.get("download_blocking.review_queue", [])
+        queue = [e for e in queue if e.get("status") == "pending"]
+        self.config.set("download_blocking.review_queue", queue)
 
     # ------------------------------------------------------------------
     # Query helpers
@@ -329,8 +474,8 @@ class DownloadBlocker:
             import ctypes
             ctypes.windll.user32.MessageBoxW(  # type: ignore[attr-defined]
                 0,
-                f"The file \"{filename}\" was blocked and deleted by Computer Lockdown.",
-                "Computer Lockdown — Download Blocked",
+                f"The file \"{filename}\" was blocked and quarantined by Computer Lockdown.",
+                "Computer Lockdown — Download Quarantined",
                 0x00000040,  # MB_ICONINFORMATION
             )
         except Exception:
