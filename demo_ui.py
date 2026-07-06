@@ -140,14 +140,12 @@ class LockedScreen(ctk.CTkFrame):
     def __init__(self, parent, on_unlock):
         super().__init__(parent, fg_color=BG_DARKEST, corner_radius=0)
         self._on_unlock = on_unlock
-        self._prompt_visible = False
 
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
         c = ctk.CTkFrame(self, fg_color="transparent")
         c.grid(row=0, column=0)
-        self._container = c
 
         # Padlock
         ctk.CTkLabel(c, text="\U0001F512", font=EMOJI_FONT, text_color=DANGER).pack(pady=(0, 12))
@@ -156,67 +154,32 @@ class LockedScreen(ctk.CTkFrame):
         ctk.CTkLabel(c, text="Computer Lockdown", font=FONT_TITLE, text_color=TEXT).pack(pady=(0, 4))
 
         # Status
-        self._status = ctk.CTkLabel(c, text="System is locked", font=FONT_BODY, text_color=DANGER)
-        self._status.pack(pady=(0, 32))
+        ctk.CTkLabel(c, text="System is locked", font=FONT_BODY, text_color=DANGER).pack(pady=(0, 24))
 
         # Glow line
-        ctk.CTkFrame(c, height=2, width=220, fg_color=DANGER, corner_radius=1).pack(pady=(0, 32))
+        ctk.CTkFrame(c, height=2, width=260, fg_color=DANGER, corner_radius=1).pack(pady=(0, 24))
 
-        # Admin Login button
-        self._login_btn = ctk.CTkButton(
-            c, text="Admin Login", font=FONT_SUB,
-            fg_color=BG_MEDIUM, hover_color=BG_HOVER, text_color=TEXT_SEC,
-            corner_radius=RADIUS, height=40, width=220,
-            command=self._show_prompt,
-        )
-        self._login_btn.pack(pady=(0, 8))
-
-        # Prompt frame (hidden)
-        self._prompt = ctk.CTkFrame(c, fg_color="transparent")
-
+        # Password entry (always visible)
         self._pw_entry = ctk.CTkEntry(
-            self._prompt, placeholder_text="Enter admin password", show="*",
+            c, placeholder_text="Enter admin password", show="*",
             font=FONT_BODY, fg_color=BG_MEDIUM, border_color=BORDER,
             text_color=TEXT, placeholder_text_color=TEXT_MUTED,
             corner_radius=RADIUS, height=40, width=260,
         )
-        self._pw_entry.pack(pady=(12, 8))
+        self._pw_entry.pack(pady=(0, 10))
         self._pw_entry.bind("<Return>", lambda _: self._try_unlock())
 
-        btn_row = ctk.CTkFrame(self._prompt, fg_color="transparent")
-        btn_row.pack(pady=(0, 4))
-
+        # Unlock button
         ctk.CTkButton(
-            btn_row, text="Unlock", font=FONT_BODY,
+            c, text="Unlock", font=FONT_SUB,
             fg_color=ACCENT, hover_color=ACCENT_HVR, text_color=TEXT,
-            corner_radius=RADIUS, height=40, width=120,
+            corner_radius=RADIUS, height=40, width=260,
             command=self._try_unlock,
-        ).grid(row=0, column=0, padx=(0, 6))
+        ).pack(pady=(0, 6))
 
-        ctk.CTkButton(
-            btn_row, text="Cancel", font=FONT_BODY,
-            fg_color=BG_MEDIUM, hover_color=BG_HOVER, text_color=TEXT_SEC,
-            corner_radius=RADIUS, height=40, width=120,
-            command=self._hide_prompt,
-        ).grid(row=0, column=1, padx=(6, 0))
-
-        self._err = ctk.CTkLabel(self._prompt, text="", font=FONT_SMALL, text_color=DANGER)
+        # Error label
+        self._err = ctk.CTkLabel(c, text="", font=FONT_SMALL, text_color=DANGER)
         self._err.pack(pady=(4, 0))
-
-    def _show_prompt(self):
-        if self._prompt_visible:
-            return
-        self._prompt_visible = True
-        self._login_btn.pack_forget()
-        self._prompt.pack(pady=(0, 8))
-        self._pw_entry.focus_set()
-
-    def _hide_prompt(self):
-        self._pw_entry.delete(0, "end")
-        self._err.configure(text="")
-        self._prompt.pack_forget()
-        self._login_btn.pack(pady=(0, 8))
-        self._prompt_visible = False
 
     def _try_unlock(self):
         pw = self._pw_entry.get().strip()
@@ -227,7 +190,8 @@ class LockedScreen(ctk.CTkFrame):
         self._on_unlock()
 
     def reset(self):
-        self._hide_prompt()
+        self._pw_entry.delete(0, "end")
+        self._err.configure(text="")
 
 
 # ── Admin Dashboard ───────────────────────────────────────────────────────────
