@@ -76,7 +76,16 @@ def build(*, debug: bool = False) -> None:
         "--onefile",
         # Data directories
         f"--add-data=config{sep}config",
-        f"--add-data=assets{sep}assets",
+    ]
+
+    # Only bundle assets if the directory has actual files
+    assets_dir = PROJECT_ROOT / "assets"
+    if assets_dir.is_dir() and any(
+        f for f in assets_dir.iterdir() if f.name != ".gitkeep"
+    ):
+        pyinstaller_args.append(f"--add-data=assets{sep}assets")
+
+    pyinstaller_args += [
         # Hidden imports that PyInstaller may not detect automatically
         "--hidden-import=customtkinter",
         "--hidden-import=pystray",
