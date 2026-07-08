@@ -57,6 +57,7 @@ SYSTEM_CRITICAL_PROCESSES: set[str] = {
 
 # Our own executable name(s) so we never kill ourselves.
 _OWN_PROCESS_NAMES: set[str] = {
+    "computerlockdown.exe",
     "computer-lockdown.exe",
     "computer_lockdown.exe",
     "python.exe",
