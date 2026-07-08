@@ -277,13 +277,16 @@ class TimeManager:
             self._callbacks["lockout"] = callback
 
     def on_lockout(self) -> None:
-        """Default lockout handler: lock the Windows workstation.
+        """Default lockout handler.
 
-        Can be overridden or replaced via ``set_lockout_callback``.
+        When no callback is set, this logs a warning.  The GUI layer
+        should set a callback via ``set_lockout_callback`` that
+        switches back to the locked screen and re-engages enforcement.
         """
-        logger.info("Lockout triggered — locking workstation.")
-        if _LOCK_WORKSTATION is not None:
-            _LOCK_WORKSTATION()
+        logger.warning(
+            "Lockout triggered but no callback is set — "
+            "the GUI should register a lockout callback."
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
