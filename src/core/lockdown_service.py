@@ -261,17 +261,11 @@ class LockdownService:
         if platform.system() != "Windows":
             logger.debug("Dry-run: would disable Safe Mode.")
             return
-        import subprocess
+        from ..utils.subprocess_helper import run_hidden
         try:
-            subprocess.run(
-                ["bcdedit", "/set", "{default}", "safeboot", "minimal"],
-                capture_output=True, timeout=10,
-            )
+            run_hidden(["bcdedit", "/set", "{default}", "safeboot", "minimal"])
             # Remove the safeboot option to prevent booting into it
-            subprocess.run(
-                ["bcdedit", "/deletevalue", "{default}", "safeboot"],
-                capture_output=True, timeout=10,
-            )
+            run_hidden(["bcdedit", "/deletevalue", "{default}", "safeboot"])
             logger.info("Safe Mode boot disabled via BCD.")
         except Exception:
             logger.warning("Could not modify BCD — Safe Mode may still be accessible.")
@@ -285,7 +279,7 @@ class LockdownService:
         if platform.system() != "Windows":
             logger.debug("Dry-run: would block DoH endpoints.")
             return
-        import subprocess
+        from ..utils.subprocess_helper import run_hidden
 
         # Major DoH provider IPs that browsers use
         doh_ips = [
@@ -305,10 +299,9 @@ class LockdownService:
 
         # Remove existing rule first
         try:
-            subprocess.run(
+            run_hidden(
                 ["netsh", "advfirewall", "firewall", "delete", "rule",
                  f"name={rule_name}"],
-                capture_output=True, timeout=10,
             )
         except Exception:
             pass
@@ -316,11 +309,10 @@ class LockdownService:
         # Block outbound HTTPS (443) to DoH providers
         for ip in doh_ips:
             try:
-                subprocess.run(
+                run_hidden(
                     ["netsh", "advfirewall", "firewall", "add", "rule",
                      f"name={rule_name}", "dir=out", "action=block",
                      "protocol=tcp", f"remoteip={ip}", "remoteport=443"],
-                    capture_output=True, timeout=10,
                 )
             except Exception:
                 pass
@@ -332,12 +324,11 @@ class LockdownService:
         import platform
         if platform.system() != "Windows":
             return
-        import subprocess
+        from ..utils.subprocess_helper import run_hidden
         try:
-            subprocess.run(
+            run_hidden(
                 ["netsh", "advfirewall", "firewall", "delete", "rule",
                  "name=ComputerLockdown_BlockDoH"],
-                capture_output=True, timeout=10,
             )
             logger.info("DoH endpoint blocks removed.")
         except Exception:

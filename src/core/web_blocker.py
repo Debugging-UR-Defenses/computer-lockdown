@@ -13,6 +13,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from ..utils.subprocess_helper import run_hidden
+
 from ..utils.config import ConfigManager
 
 logger = logging.getLogger(__name__)
@@ -217,10 +219,8 @@ class WebBlocker:
             return
 
         try:
-            subprocess.run(
+            run_hidden(
                 ["ipconfig", "/flushdns"],
-                capture_output=True,
-                timeout=10,
                 check=False,
             )
             logger.info("DNS cache flushed.")

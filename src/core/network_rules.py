@@ -8,10 +8,10 @@ by port/protocol, and blocking outbound connections to unauthorized ports.
 
 import logging
 import platform
-import subprocess
 from typing import Optional
 
 from ..utils.config import ConfigManager
+from ..utils.subprocess_helper import run_hidden
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class NetworkRules:
         
         # Remove rules by prefix
         try:
-            result = subprocess.run(
+            result = run_hidden(
                 ["netsh", "advfirewall", "firewall", "show", "rule",
                  f"name=all"],
                 capture_output=True, text=True, timeout=10,
@@ -96,14 +96,14 @@ class NetworkRules:
         
         try:
             # Allow inbound
-            subprocess.run(
+            run_hidden(
                 ["netsh", "advfirewall", "firewall", "add", "rule",
                  f"name={rule_name}_In", "dir=in", f"action=allow",
                  f"protocol={protocol}", f"localport={port}"],
                 capture_output=True, text=True, timeout=10,
             )
             # Allow outbound
-            subprocess.run(
+            run_hidden(
                 ["netsh", "advfirewall", "firewall", "add", "rule",
                  f"name={rule_name}_Out", "dir=out", f"action=allow",
                  f"protocol={protocol}", f"remoteport={port}"],
@@ -131,7 +131,7 @@ class NetworkRules:
             return
         
         try:
-            subprocess.run(
+            run_hidden(
                 ["netsh", "advfirewall", "firewall", "add", "rule",
                  f"name={rule_name}", "dir=out", "action=block",
                  f"protocol={protocol}", f"remoteport={port}"],
@@ -147,7 +147,7 @@ class NetworkRules:
         if not _IS_WINDOWS:
             return
         try:
-            subprocess.run(
+            run_hidden(
                 ["netsh", "advfirewall", "firewall", "delete", "rule",
                  f"name={rule_name}"],
                 capture_output=True, text=True, timeout=10,
