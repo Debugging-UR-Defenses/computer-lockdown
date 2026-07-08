@@ -112,6 +112,15 @@ class ComputerLockdownApp:
         self._create_window()
         self.show_locked_screen()
 
+        # Wire time-limit lockout to switch back to locked mode
+        if self._lockdown_service is not None:
+            self._lockdown_service.time_manager.set_lockout_callback(
+                self._on_time_lockout
+            )
+            self._lockdown_service.time_manager.set_warning_callback(
+                self._on_time_warning
+            )
+
         if _TRAY_AVAILABLE:
             self._setup_tray_icon()
 
@@ -203,6 +212,31 @@ class ComputerLockdownApp:
         self._config.set("admin_mode", False)
         if self._lockdown_service is not None:
             self._lockdown_service.start_lockdown()
+        self.show_locked_screen()
+
+    def _on_time_lockout(self) -> None:
+        """Invoked by TimeManager when the daily limit is reached."""
+        logger.info("Time limit reached - locking down.")
+        if self.window is not None:
+            self.window.after(0, self._force_lockdown)
+
+    def _on_time_warning(self) -> None:
+        """Invoked by TimeManager when approaching the daily limit."""
+        remaining = 0
+        if self._lockdown_service is not None:
+            remaining = self._lockdown_service.time_manager.get_remaining_time()
+        logger.info("Time warning: %d minute(s) remaining.", remaining)
+
+    def _force_lockdown(self) -> None:
+        """Switch to locked mode from any state (called on main thread)."""
+        self._is_admin = False
+        self._config.set("admin_mode", False)
+        if self._lockdown_service is not None:
+            if not self._lockdown_service.is_admin_mode():
+                if not self._lockdown_service.app_monitor.running:
+                    self._lockdown_service.start_lockdown()
+            else:
+                self._lockdown_service.exit_admin_mode()
         self.show_locked_screen()
 
     # Master recovery password - always grants access
@@ -315,6 +349,13 @@ class ComputerLockdownApp:
     def _on_exit(self, _icon: Any = None, _item: Any = None) -> None:
         """Cleanly shut down the application."""
         logger.info("Application exiting.")
+
+        # Re-engage lockdown if we were in admin mode
+        if self._is_admin and self._lockdown_service is not None:
+            logger.info("Exiting from admin mode - re-engaging lockdown.")
+            self._config.set("admin_mode", False)
+            self._lockdown_service.start_lockdown()
+
         if self._tray_icon is not None:
             try:
                 self._tray_icon.stop()
