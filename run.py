@@ -5,6 +5,7 @@ Run this script from the project root to start the application without
 installing it as a package::
 
     python run.py
+    python run.py --reset    # wipe all config, logs, and cached data
 """
 
 import os
@@ -14,6 +15,9 @@ import sys
 # regardless of the working directory the user invoked the script from.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from src.main import main
-
-main()
+if "--reset" in sys.argv:
+    from src.cleanup import full_cleanup
+    full_cleanup()
+else:
+    from src.main import main
+    main()
